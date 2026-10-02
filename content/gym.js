@@ -78,6 +78,8 @@ window.GUIDES.gym = {
     { dow: 0, day: "Sunday", session: "lowerB", note: "Do Shop 1 before the gym (check your Aldi's Sunday closing time) and cook batch A after." }
   ],
   trainAt: "15:30",
+  // Minutes: walk each way, time in the gym, shower at home. Used to build the timetable.
+  plan: { walkMin: 10, trainMin: 80, showerMin: 20 },
   restNote: "Missed a session? Use the spare slot or just pick up with the next session. Don't double up."
 };
 

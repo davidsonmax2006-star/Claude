@@ -499,7 +499,8 @@
   });
 
   // ---------- boot ----------
-  function onResume() { if (dayKey() !== lastDay) render(); }
+  // The home screen has no inputs, so it is refreshed on every return to keep its "Next:" line current.
+  function onResume() { if (dayKey() !== lastDay || (!currentPage && !currentGuide)) render(); }
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
       // Commit a half-typed value (fires its change handler) in case iOS discards the suspended app.

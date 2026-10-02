@@ -6,6 +6,7 @@ window.GUIDES.meals = {
   tabs: [["today", "Today"], ["week", "Week"], ["recipes", "Recipes"], ["shopping", "Shopping"], ["notes", "Notes"]],
   defaultTab: "today",
   target: { kcal: 3450, protein: 220, carbs: 455, fat: 75 },
+  bedtime: "23:30",
 
   // Every meal in the plan. k = kcal, p = protein g, c = carbs g, f = fat g.
   meals: {

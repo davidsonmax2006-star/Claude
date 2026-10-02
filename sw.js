@@ -1,8 +1,8 @@
 // When shipping changes: bump CACHE here and the ?v= number on the files in index.html and FILES below.
-var CACHE = 'myplans-v3';
+var CACHE = 'myplans-v4';
 var FILES = [
-  './', 'index.html', 'style.css?v=3', 'app.js?v=3', 'guides.js?v=3', 'manifest.webmanifest',
-  'content/gym.js?v=3', 'content/meals.js?v=3', 'content/recipes.js?v=3', 'content/shopping.js?v=3',
+  './', 'index.html', 'style.css?v=4', 'app.js?v=4', 'guides.js?v=4', 'manifest.webmanifest',
+  'content/gym.js?v=4', 'content/meals.js?v=4', 'content/recipes.js?v=4', 'content/shopping.js?v=4',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
 ];
 

@@ -191,3 +191,57 @@ dialog p { margin: 0 0 12px; color: var(--muted); }
 .tab { flex: 1; min-width: 0; min-height: 48px; padding: 0 2px; border: 0; border-radius: 12px; background: transparent;
   color: var(--muted); font-size: 13px; font-weight: 650; }
 .tab[aria-selected="true"] { background: var(--g); color: #fff; }
+
+/* ---------- Timetable ---------- */
+.g-time { --g: #1d4ed8; --gt: #1d4ed8; --gs: rgba(29, 78, 216, .10); }
+@media (prefers-color-scheme: dark) { .g-time { --gt: #60a5fa; --gs: rgba(96, 165, 250, .16); } }
+
+.tt-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 0 2px 8px; }
+.tt-clock { font-size: 44px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.tt-date { color: var(--muted); text-align: right; }
+.tt-card { background: var(--gs); border: 1px solid var(--g); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; }
+.tt-card-k { color: var(--gt); font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.tt-card-t { font-size: 20px; font-weight: 700; overflow-wrap: anywhere; }
+.tt-card-s { color: var(--muted); }
+.tt-next { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+
+.tt-days { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.daybtn { flex: 1 1 0; min-width: 44px; min-height: 44px; padding: 0 6px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--card); color: var(--text); font-weight: 600; font-size: 14px; }
+.daybtn.today { border-color: var(--g); }
+.daybtn[aria-pressed="true"] { background: var(--g); border-color: var(--g); color: #fff; }
+.daybtn.wide { flex: 0 0 auto; min-width: 96px; margin-bottom: 12px; }
+
+.tt-row { display: grid; grid-template-columns: 92px 1fr; gap: 10px; background: var(--card); border: 1px solid var(--line);
+  border-left: 5px solid var(--muted); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+.tt-row.k-meal { border-left-color: #16a34a; }
+.tt-row.k-gym { border-left-color: #ea580c; }
+.tt-row.k-mine { border-left-color: var(--g); }
+.tt-row.past { opacity: .5; }
+.tt-row.now { background: var(--gs); border-color: var(--g); box-shadow: 0 0 0 2px var(--g) inset; }
+.tt-row.next { border-color: var(--g); }
+.tt-time { font-variant-numeric: tabular-nums; font-weight: 650; font-size: 15px; color: var(--muted); }
+.tt-row.now .tt-time { color: var(--gt); }
+.tt-b, .tt-ev-b { min-width: 0; }
+.tt-t { font-weight: 650; overflow-wrap: anywhere; }
+.tt-s { color: var(--muted); font-size: 14px; }
+
+.tt-set { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px 4px; margin: 14px 0 12px; }
+.tt-set-t { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+
+.tt-form { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 8px; }
+.tt-form-t { font-weight: 700; font-size: 18px; margin-bottom: 10px; }
+.tt-input { display: block; width: 100%; min-width: 0; min-height: 48px; font-size: 16px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--text); padding: 0 12px; margin-bottom: 12px; }
+.tt-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tt-lab > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.tt-actions { display: flex; gap: 8px; }
+.tt-actions .btn { flex: 1; }
+.tt-actions .btn[hidden] { display: none; }
+.tt-ev { display: flex; align-items: center; gap: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 8px 4px 8px 12px; margin-bottom: 8px; }
+.tt-ev-b { flex: 1; }
+.ibtn { width: 44px; min-height: 44px; background: none; border: 0; color: var(--muted); font-size: 18px; }
+.ibtn.danger { color: var(--danger); }
+
+.tt-days .daybtn { min-width: 0; padding: 0 2px; }
+.tt-days .daybtn.wide { min-width: 96px; }

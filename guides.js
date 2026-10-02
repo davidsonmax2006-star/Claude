@@ -5,12 +5,21 @@
 
   var KEY = 'myplans.guides';
   var G = window.GUIDES || {};
-  var ORDER = ['gym', 'meals'];
+  var ORDER = ['time', 'gym', 'meals'];
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   var DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   var ID_RE = /^[a-z0-9_]{1,40}$/;
   var DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
   var KG_RE = /^\d{1,3}(\.\d{1,2})?$/;
+  var TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+  var MAX_EVENTS = 100;
+
+  // The timetable's content is built from the gym and meal plans plus the user's own events.
+  G.time = {
+    id: 'time', title: 'Timetable', defaultTab: 'live',
+    blurb: 'What is on now and next. Works offline.',
+    tabs: [['live', 'Live'], ['mine', 'My events']]
+  };
 
   // ---------- dates (always local time, never UTC) ----------
   function pad(n) { return n < 10 ? '0' + n : '' + n; }
@@ -23,7 +32,7 @@
 
   // ---------- stored progress ----------
   function emptyState() {
-    return { version: 1, gym: { done: {}, weights: {} }, meals: { done: {}, shop: {} } };
+    return { version: 1, gym: { done: {}, weights: {} }, meals: { done: {}, shop: {} }, time: { events: [], showPlan: true, cycle: null } };
   }
 
   // Validates untrusted data (storage or an imported backup). Old backups without guides give an empty state.
@@ -53,6 +62,26 @@
         if (ID_RE.test(id) && e && typeof e === 'object' && KG_RE.test(String(e.kg)) && DATE_RE.test(String(e.date))) {
           out.gym.weights[id] = { kg: String(e.kg), date: String(e.date) };
         }
+      });
+    }
+    var tm = raw.time;
+    if (tm && typeof tm === 'object') {
+      out.time.showPlan = tm.showPlan !== false;
+      var c = tm.cycle;
+      if (c && typeof c === 'object' && DATE_RE.test(String(c.monday)) && (c.week === 1 || c.week === 2)) {
+        out.time.cycle = { monday: String(c.monday), week: c.week };
+      }
+      var seen = {};
+      (Array.isArray(tm.events) ? tm.events : []).slice(0, MAX_EVENTS).forEach(function (e) {
+        if (!e || typeof e !== 'object' || !ID_RE.test(String(e.id)) || seen[e.id]) return;
+        var title = String(e.title == null ? '' : e.title).trim().slice(0, 60);
+        var days = [];
+        (Array.isArray(e.days) ? e.days : []).forEach(function (d) { if (Number.isInteger(d) && d >= 0 && d <= 6 && days.indexOf(d) < 0) days.push(d); });
+        var start = String(e.start), end = e.end == null ? '' : String(e.end);
+        if (!title || !days.length || !TIME_RE.test(start)) return;
+        if (end !== '' && (!TIME_RE.test(end) || end <= start)) return;
+        seen[e.id] = true;
+        out.time.events.push({ id: String(e.id), title: title, days: days.sort(), start: start, end: end, weeks: e.weeks === 1 || e.weeks === 2 ? e.weeks : 0 });
       });
     }
     var s = raw.meals && raw.meals.shop;
@@ -515,16 +544,332 @@
     root.appendChild(para(G.meals.footnote, 'gp muted'));
   }
 
+  // ---------- Timetable ----------
+  var SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Monday first
+
+  function toMin(hhmm) { return parseInt(hhmm.slice(0, 2), 10) * 60 + parseInt(hhmm.slice(3, 5), 10); }
+  function minStr(m) { return m >= 1440 ? '24:00' : pad(Math.floor(m / 60)) + ':' + pad(m % 60); }
+  function nowMin(d) { return d.getHours() * 60 + d.getMinutes(); }
+  function dur(m) {
+    if (m < 60) return m + ' min';
+    return Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '');
+  }
+
+  // Which week of the two-week cycle it is, or null if the user hasn't set it.
+  // Counts whole weeks between Mondays using UTC day numbers built from local date parts, so clock changes can't shift it.
+  function currentWeek(d) {
+    var c = st.time.cycle;
+    if (!c) return null;
+    var p = c.monday.split('-').map(Number);
+    var mondayNow = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7));
+    var diff = Math.round((Date.UTC(mondayNow.getFullYear(), mondayNow.getMonth(), mondayNow.getDate()) - Date.UTC(p[0], p[1] - 1, p[2])) / 86400000);
+    var flips = ((Math.floor(diff / 7) % 2) + 2) % 2;
+    return flips ? (c.week === 1 ? 2 : 1) : c.week;
+  }
+
+  // Gym and meal blocks come straight from the plan data, so they follow the weekday rotation.
+  function planItems(dow) {
+    var g = G.gym, m = G.meals, items = [];
+    planFor(m, dow).forEach(function (it) {
+      if (it.slot.gym) return;
+      var r = /^(\d\d:\d\d)(?:–(\d\d:\d\d))?/.exec(it.slot.time);
+      var s = toMin(r[1]);
+      items.push({ start: s, end: Math.min(r[2] ? toMin(r[2]) : s + 30, 1440), title: it.meal.name, sub: (it.slot.label !== it.meal.name ? it.slot.label + ' · ' : '') + fmt(it.meal.k) + ' kcal', kind: 'meal' });
+    });
+    var e = weekEntry(g, dow), sess = e && e.session ? g.sessions[e.session] : null;
+    if (sess) {
+      var T = toMin(g.trainAt), p = g.plan;
+      var out = T + p.trainMin;
+      items.push({ start: T - p.walkMin, end: T, title: 'Head to the gym', sub: 'About ' + p.walkMin + ' minutes', kind: 'gym' });
+      items.push({ start: T, end: Math.min(out, 1440), title: sess.name + (sess.optional ? ' (optional)' : ''), sub: sess.length, kind: 'gym' });
+      items.push({ start: out + p.walkMin, end: Math.min(out + p.walkMin + p.showerMin, 1440), title: 'Home and shower', sub: 'About ' + p.showerMin + ' minutes', kind: 'gym' });
+    }
+    if (m.bedtime) items.push({ start: toMin(m.bedtime), end: 1440, title: 'Bed', sub: 'Aim for 8 hours', kind: 'sleep' });
+    return items;
+  }
+
+  function eventSub(e, week) {
+    var bits = [];
+    if (e.weeks) bits.push(week ? 'Week ' + e.weeks + ' only' : 'Week ' + e.weeks + ' only (set the week below)');
+    return bits.join(' · ');
+  }
+
+  function itemsFor(dow, week) {
+    var items = st.time.showPlan ? planItems(dow) : [];
+    st.time.events.forEach(function (e) {
+      if (e.days.indexOf(dow) < 0) return;
+      if (e.weeks && week && e.weeks !== week) return;
+      var s = toMin(e.start);
+      items.push({ start: s, end: e.end ? toMin(e.end) : Math.min(s + 15, 1440), point: !e.end, title: e.title, sub: eventSub(e, week), kind: 'mine' });
+    });
+    items.forEach(function (it, i) { it.order = i; });
+    items.sort(function (a, b) { return a.start - b.start || a.order - b.order; });
+    return items;
+  }
+
+  // What is on now and what comes next, for a list of items sorted by start time.
+  function nowNext(items, nm) {
+    var cur = items.filter(function (it) { return it.start <= nm && nm < it.end; });
+    var upcoming = items.filter(function (it) { return it.start > nm; });
+    var next = upcoming.length ? upcoming.filter(function (it) { return it.start === upcoming[0].start; }) : [];
+    return { now: cur, next: next };
+  }
+
+  // Live updates: one timer, aligned to the minute, that stops itself when its screen is gone.
+  var liveTimer = null, liveTick = null;
+  function stopLive() { if (liveTimer) clearTimeout(liveTimer); liveTimer = null; liveTick = null; }
+  function startLive(root, tick) {
+    stopLive();
+    liveTick = function () {
+      if (!document.body.contains(root)) { stopLive(); return false; }
+      tick();
+      return true;
+    };
+    (function schedule() {
+      liveTimer = setTimeout(function () { if (liveTick && liveTick()) schedule(); }, 60000 - (Date.now() % 60000) + 50);
+    })();
+  }
+  // iOS freezes timers in the background, so catch up whenever the app comes back.
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && liveTick) liveTick(); });
+  window.addEventListener('pageshow', function () { if (liveTick) liveTick(); });
+
+  function mondayKey(d) {
+    var m = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7));
+    return dateKey(m);
+  }
+
+  function toggleBtn(text, pressed, onClick, cls) {
+    var b = el('button', { class: cls || 'daybtn', type: 'button', 'aria-pressed': pressed ? 'true' : 'false', text: text });
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function timeLive(root, ctx) {
+    var first = new Date();
+    var builtKey = dateKey(first);
+    var todayDow = first.getDay();
+    var sel = todayDow;
+    var clock = el('div', { class: 'tt-clock' });
+    var dateLine = el('div', { class: 'tt-date' });
+    var card = el('div', { class: 'tt-card' });
+    var chipRow = el('div', { class: 'tt-days', role: 'group', 'aria-label': 'Day' });
+    var listBox = el('div', { class: 'tt-list' });
+    var rows = [];
+
+    root.appendChild(el('div', { class: 'tt-top' }, [clock, dateLine]));
+    root.appendChild(card);
+    root.appendChild(chipRow);
+    root.appendChild(listBox);
+
+    function chips() {
+      chipRow.textContent = '';
+      WEEK_ORDER.forEach(function (d) {
+        var b = toggleBtn(SHORT[d], d === sel, function () { sel = d; chips(); build(); tick(); }, 'daybtn' + (d === todayDow ? ' today' : ''));
+        chipRow.appendChild(b);
+      });
+    }
+
+    function build() {
+      listBox.textContent = '';
+      rows = [];
+      var items = itemsFor(sel, currentWeek(new Date()));
+      if (!items.length) listBox.appendChild(para('Nothing scheduled. Add your own events under My events.', 'gp muted'));
+      items.forEach(function (it) {
+        var time = it.point ? minStr(it.start) : minStr(it.start) + '–' + minStr(it.end);
+        var body = el('div', { class: 'tt-b' }, [el('div', { class: 'tt-t', text: it.title })]);
+        if (it.sub) body.appendChild(el('div', { class: 'tt-s', text: it.sub }));
+        var row = el('div', { class: 'tt-row k-' + it.kind }, [el('div', { class: 'tt-time', text: time }), body]);
+        listBox.appendChild(row);
+        rows.push({ el: row, it: it });
+      });
+    }
+
+    function names(list) { return list.map(function (x) { return x.title; }).join(' + '); }
+
+    function tick() {
+      var n = new Date();
+      if (dateKey(n) !== builtKey) { ctx.refresh(); return; } // a new day started while open
+      var wk = currentWeek(n);
+      clock.textContent = minStr(nowMin(n));
+      dateLine.textContent = DAYS[n.getDay()] + ' ' + n.getDate() + ' ' + MONTHS[n.getMonth()] + (wk ? ' · Week ' + wk : '');
+      card.textContent = '';
+      if (sel !== todayDow) {
+        card.appendChild(el('div', { class: 'tt-card-k', text: 'Viewing' }));
+        card.appendChild(el('div', { class: 'tt-card-t', text: DAYS[sel] }));
+        card.appendChild(el('button', { class: 'linkbtn', type: 'button', text: 'Back to today', onclick: function () { sel = todayDow; chips(); build(); tick(); } }));
+        rows.forEach(function (r) { r.el.className = 'tt-row k-' + r.it.kind; });
+        return;
+      }
+      var nm = nowMin(n);
+      var nn = nowNext(rows.map(function (r) { return r.it; }), nm);
+      if (nn.now.length) {
+        var endsIn = Math.min.apply(null, nn.now.map(function (x) { return x.end; })) - nm;
+        card.appendChild(el('div', { class: 'tt-card-k', text: 'Now' }));
+        card.appendChild(el('div', { class: 'tt-card-t', text: names(nn.now) }));
+        card.appendChild(el('div', { class: 'tt-card-s', text: 'Ends in ' + dur(endsIn) }));
+      } else {
+        card.appendChild(el('div', { class: 'tt-card-k', text: 'Now' }));
+        card.appendChild(el('div', { class: 'tt-card-t', text: 'Nothing on right now' }));
+      }
+      if (nn.next.length) {
+        card.appendChild(el('div', { class: 'tt-next' }, [el('strong', { text: 'Next: ' }), document.createTextNode(minStr(nn.next[0].start) + ' ' + names(nn.next) + ' (in ' + dur(nn.next[0].start - nm) + ')')]));
+      } else {
+        var tomorrow = itemsFor((todayDow + 1) % 7, currentWeek(new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1)));
+        card.appendChild(el('div', { class: 'tt-next', text: tomorrow.length ? "That's everything today. Tomorrow starts at " + minStr(tomorrow[0].start) + ' with ' + tomorrow[0].title + '.' : "That's everything for today." }));
+      }
+      rows.forEach(function (r) {
+        var cls = 'tt-row k-' + r.it.kind;
+        if (r.it.end <= nm) cls += ' past';
+        else if (r.it.start <= nm) cls += ' now';
+        else if (nn.next.indexOf(r.it) >= 0) cls += ' next';
+        r.el.className = cls;
+      });
+    }
+
+    chips();
+    build();
+    tick();
+
+    // Settings
+    var settings = el('div', { class: 'tt-set' });
+    settings.appendChild(el('div', { class: 'tt-set-t', text: 'Show gym and meals' }));
+    var planBtn = toggleBtn(st.time.showPlan ? 'On' : 'Off', st.time.showPlan, function () {
+      st.time.showPlan = !st.time.showPlan;
+      planBtn.textContent = st.time.showPlan ? 'On' : 'Off';
+      planBtn.setAttribute('aria-pressed', st.time.showPlan ? 'true' : 'false');
+      save(ctx); build(); tick();
+    }, 'daybtn wide');
+    settings.appendChild(planBtn);
+    settings.appendChild(el('div', { class: 'tt-set-t', text: 'This week is' }));
+    var wkRow = el('div', { class: 'tt-days' });
+    function weekBtns() {
+      wkRow.textContent = '';
+      var cw = currentWeek(new Date());
+      [[1, 'Week 1'], [2, 'Week 2'], [0, 'Not using']].forEach(function (x) {
+        wkRow.appendChild(toggleBtn(x[1], x[0] === 0 ? !st.time.cycle : cw === x[0], function () {
+          st.time.cycle = x[0] ? { monday: mondayKey(new Date()), week: x[0] } : null;
+          save(ctx); weekBtns(); build(); tick();
+        }, 'daybtn'));
+      });
+    }
+    weekBtns();
+    settings.appendChild(wkRow);
+    settings.appendChild(para('If your lectures differ between two weeks, set which one this is. Events marked "Week 1 only" or "Week 2 only" then show on the right weeks.', 'gp muted'));
+    root.appendChild(settings);
+    root.appendChild(el('button', { class: 'btn alt wide', type: 'button', text: '+ Add my own event', onclick: function () { ctx.setTab('mine'); } }));
+    root.appendChild(para('Works offline: it only uses the clock and what is saved on this phone.', 'gp muted'));
+
+    startLive(root, tick);
+  }
+
+  function newEventId() { return 'e' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+  function eventSummary(e) {
+    var days = e.days.slice().sort(function (a, b) { return WEEK_ORDER.indexOf(a) - WEEK_ORDER.indexOf(b); }).map(function (d) { return SHORT[d]; }).join(', ');
+    return days + ' · ' + e.start + (e.end ? '–' + e.end : '') + (e.weeks ? ' · Week ' + e.weeks + ' only' : '');
+  }
+
+  function timeMine(root, ctx) {
+    var editing = null;
+    var days = {}, weeks = 0;
+    root.appendChild(para('Add things like lectures, work or appointments. They stay on this phone, show up in the Live timetable and are included in your backups.', 'gp muted'));
+
+    var titleIn = el('input', { type: 'text', class: 'tt-input', maxlength: '60', placeholder: 'Title, e.g. Lecture', 'aria-label': 'Event title', autocomplete: 'off' });
+    var startIn = el('input', { type: 'time', class: 'tt-input', 'aria-label': 'Start time' });
+    var endIn = el('input', { type: 'time', class: 'tt-input', 'aria-label': 'End time (optional)' });
+    var dayRow = el('div', { class: 'tt-days' });
+    var weekRow = el('div', { class: 'tt-days' });
+    var heading = el('div', { class: 'tt-form-t', text: 'New event' });
+    var saveBtn = el('button', { class: 'btn', type: 'button', text: 'Add event' });
+    var cancelBtn = el('button', { class: 'btn alt', type: 'button', text: 'Cancel', hidden: 'hidden' });
+
+    function drawDays() {
+      dayRow.textContent = '';
+      WEEK_ORDER.forEach(function (d) {
+        dayRow.appendChild(toggleBtn(SHORT[d], !!days[d], function () { days[d] = !days[d]; drawDays(); }));
+      });
+    }
+    function drawWeeks() {
+      weekRow.textContent = '';
+      [[0, 'Every week'], [1, 'Week 1 only'], [2, 'Week 2 only']].forEach(function (x) {
+        weekRow.appendChild(toggleBtn(x[1], weeks === x[0], function () { weeks = x[0]; drawWeeks(); }));
+      });
+    }
+    function reset() {
+      editing = null; days = {}; weeks = 0;
+      titleIn.value = ''; startIn.value = ''; endIn.value = '';
+      heading.textContent = 'New event'; saveBtn.textContent = 'Add event'; cancelBtn.hidden = true;
+      drawDays(); drawWeeks();
+    }
+    cancelBtn.addEventListener('click', reset);
+
+    saveBtn.addEventListener('click', function () {
+      var title = titleIn.value.trim().slice(0, 60);
+      var chosen = WEEK_ORDER.filter(function (d) { return days[d]; });
+      var s = startIn.value, e = endIn.value;
+      if (!title) { ctx.toast('Give the event a title'); return; }
+      if (!chosen.length) { ctx.toast('Pick at least one day'); return; }
+      if (!TIME_RE.test(s)) { ctx.toast('Pick a start time'); return; }
+      if (e !== '' && (!TIME_RE.test(e) || e <= s)) { ctx.toast('The end time must be after the start'); return; }
+      if (!editing && st.time.events.length >= MAX_EVENTS) { ctx.toast('That is the maximum number of events'); return; }
+      var ev = { id: editing ? editing.id : newEventId(), title: title, days: chosen.slice().sort(), start: s, end: e, weeks: weeks };
+      if (editing) st.time.events = st.time.events.map(function (x) { return x.id === editing.id ? ev : x; });
+      else st.time.events.push(ev);
+      save(ctx);
+      ctx.toast(editing ? 'Saved' : 'Added');
+      ctx.refresh();
+    });
+
+    function labelled(text, input) { return el('label', { class: 'tt-lab' }, [el('span', { text: text }), input]); }
+    root.appendChild(el('div', { class: 'tt-form' }, [
+      heading, titleIn,
+      el('div', { class: 'tt-set-t', text: 'Days' }), dayRow,
+      el('div', { class: 'tt-pair' }, [labelled('Start', startIn), labelled('End (optional)', endIn)]),
+      el('div', { class: 'tt-set-t', text: 'Repeats' }), weekRow,
+      el('div', { class: 'tt-actions' }, [saveBtn, cancelBtn])
+    ]));
+    reset();
+
+    root.appendChild(el('h3', { class: 'gh3', text: 'My events' }));
+    var evs = st.time.events.slice().sort(function (a, b) {
+      return WEEK_ORDER.indexOf(a.days[0]) - WEEK_ORDER.indexOf(b.days[0]) || (a.start < b.start ? -1 : a.start > b.start ? 1 : 0);
+    });
+    if (!evs.length) root.appendChild(para('No events yet.', 'gp muted'));
+    evs.forEach(function (ev) {
+      root.appendChild(el('div', { class: 'tt-ev' }, [
+        el('div', { class: 'tt-ev-b' }, [el('div', { class: 'tt-t', text: ev.title }), el('div', { class: 'tt-s', text: eventSummary(ev) })]),
+        el('button', { class: 'ibtn', type: 'button', 'aria-label': 'Edit ' + ev.title, text: '✎', onclick: function () {
+          editing = ev; days = {}; ev.days.forEach(function (d) { days[d] = true; }); weeks = ev.weeks;
+          titleIn.value = ev.title; startIn.value = ev.start; endIn.value = ev.end;
+          heading.textContent = 'Edit event'; saveBtn.textContent = 'Save changes'; cancelBtn.hidden = false;
+          drawDays(); drawWeeks();
+          heading.scrollIntoView({ block: 'start' });
+        } }),
+        el('button', { class: 'ibtn danger', type: 'button', 'aria-label': 'Delete ' + ev.title, text: '✕', onclick: function () {
+          ctx.confirm('Delete "' + ev.title + '"?', 'Delete').then(function (yes) {
+            if (!yes) return;
+            st.time.events = st.time.events.filter(function (x) { return x.id !== ev.id; });
+            save(ctx);
+            ctx.refresh();
+          });
+        } })
+      ]));
+    });
+  }
+
   // ---------- public API ----------
   var VIEWS = {
     gym: { today: gymToday, week: gymWeek, workouts: gymWorkouts, info: gymInfo },
-    meals: { today: mealsToday, week: mealsWeek, recipes: mealsRecipes, shopping: mealsShopping, notes: mealsNotes }
+    meals: { today: mealsToday, week: mealsWeek, recipes: mealsRecipes, shopping: mealsShopping, notes: mealsNotes },
+    time: { live: timeLive, mine: timeMine }
   };
 
   function render(ctx) {
     var g = G[ctx.id];
     if (!g) return false;
     var tab = VIEWS[ctx.id][ctx.tab] ? ctx.tab : g.defaultTab;
+    stopLive();
     ctx.setTitle(g.title);
     ctx.view.textContent = '';
     ctx.foot.textContent = '';
@@ -544,6 +889,11 @@
     if (id === 'gym') {
       var e = weekEntry(G.gym, t.dow);
       return e.session ? 'Today: ' + G.gym.sessions[e.session].name + (G.gym.sessions[e.session].optional ? ' (optional)' : '') : 'Today: rest day';
+    }
+    if (id === 'time') {
+      var d = new Date(), items = itemsFor(d.getDay(), currentWeek(d)), nn = nowNext(items, nowMin(d));
+      if (nn.now.length) return 'Now: ' + nn.now[0].title;
+      return nn.next.length ? 'Next: ' + minStr(nn.next[0].start) + ' ' + nn.next[0].title : 'Nothing more today';
     }
     if (id === 'meals') {
       var k = 0, p = 0;
