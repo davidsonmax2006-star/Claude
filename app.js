@@ -131,6 +131,7 @@
       (opts.buttons || []).forEach(function (b) {
         var btn = el('button', { type: 'button', class: 'btn ' + (b.cls || ''), text: b.label });
         btn.addEventListener('click', function () {
+          if (b.onClick) b.onClick(); // runs inside the tap so iOS allows share/clipboard/file picker
           var data = {};
           Object.keys(inputs).forEach(function (k) { data[k] = inputs[k].value; });
           result = { value: b.value, data: data };
@@ -158,12 +159,20 @@
   }
 
   // ---------- rendering ----------
+  var footFor = null; // page id the add-item footer was built for
+
   function render() {
     var page = currentPage ? findPage(currentPage) : null;
     if (currentPage && !page) currentPage = null;
     $view.textContent = '';
-    $foot.textContent = '';
-    if (page) renderPage(page); else renderHome();
+    if (page) {
+      renderPage(page);
+      if (footFor !== page.id) buildAddForm(page); // keep the focused input alive between edits
+    } else {
+      $foot.textContent = '';
+      footFor = null;
+      renderHome();
+    }
   }
 
   function renderHome() {
@@ -204,6 +213,11 @@
         el('button', { class: 'ib', 'aria-label': 'Move down', text: '↓', disabled: i === page.items.length - 1 ? 'disabled' : null, onclick: function () { move(page.items, i, 1); save(); render(); } })
       ]));
     });
+  }
+
+  function buildAddForm(page) {
+    footFor = page.id;
+    $foot.textContent = '';
     var input = el('input', { type: 'text', placeholder: 'Add an item…', 'aria-label': 'New item', enterkeyhint: 'done', autocomplete: 'off' });
     var form = el('form', { style: 'display:flex;gap:8px;flex:1' }, [input, el('button', { class: 'btn', type: 'submit', text: 'Add' })]);
     form.addEventListener('submit', function (e) {
@@ -211,10 +225,9 @@
       var text = input.value.trim();
       if (!text) return;
       page.items.push({ id: uid(), text: text.slice(0, 2000), done: false });
+      input.value = '';
       save();
       render();
-      var again = $foot.querySelector('input');
-      if (again) again.focus(); // keep the keyboard open for fast entry
       window.scrollTo(0, document.body.scrollHeight);
     });
     $foot.appendChild(form);
@@ -326,7 +339,7 @@
     try { file = new File([json], name, { type: 'application/json' }); } catch (e) { file = null; }
     if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
       navigator.share({ files: [file], title: 'My Plans backup' }).catch(function (e) {
-        if (e && e.name !== 'AbortError') downloadFallback(json, name);
+        if (e && e.name !== 'AbortError') toast("Couldn't open the share sheet. Try 'Copy backup' instead.");
       });
     } else {
       downloadFallback(json, name);
@@ -398,9 +411,9 @@
     var buttons = [];
     if (page) buttons.push({ label: 'Uncheck all items', value: 'uncheck', cls: 'alt' });
     buttons.push(
-      { label: 'Export backup', value: 'export', cls: 'alt' },
-      { label: 'Copy backup to clipboard', value: 'copy', cls: 'alt' },
-      { label: 'Import from file', value: 'import', cls: 'alt' },
+      { label: 'Export backup', value: 'export', cls: 'alt', onClick: exportBackup },
+      { label: 'Copy backup to clipboard', value: 'copy', cls: 'alt', onClick: copyBackup },
+      { label: 'Import from file', value: 'import', cls: 'alt', onClick: function () { $file.click(); } },
       { label: 'Import from pasted text', value: 'paste', cls: 'alt' },
       { label: 'Close', value: 'close', cls: 'alt' }
     );
@@ -412,9 +425,6 @@
     }).then(function (r) {
       if (!r) return;
       if (r.value === 'uncheck' && page) { page.items.forEach(function (x) { x.done = false; }); save(); render(); }
-      else if (r.value === 'export') exportBackup();
-      else if (r.value === 'copy') copyBackup();
-      else if (r.value === 'import') $file.click();
       else if (r.value === 'paste') pasteImport();
     });
   });

@@ -29,8 +29,7 @@ self.addEventListener('fetch', function (e) {
     isPage
       // HTML: network first so updates arrive, cache when offline.
       ? fetch(req).then(function (res) {
-          var copy = res.clone();
-          caches.open(CACHE).then(function (c) { c.put('./', copy); });
+          if (res.ok) { var copy = res.clone(); caches.open(CACHE).then(function (c) { c.put('./', copy); }); }
           return res;
         }).catch(function () { return caches.match('./').then(function (m) { return m || caches.match('index.html'); }); })
       // Everything else: serve cache, refresh in background.
