@@ -12,7 +12,10 @@
 
   // ---------- state ----------
   var state = load();
-  var currentPage = null; // page id, or null for home
+  var currentPage = null; // page id, or null
+  var currentGuide = null; // guide id ('gym', 'meals'), or null
+  var guideTab = null;
+  var guideArg = null;
 
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -162,6 +165,8 @@
   var footFor = null; // page id the add-item footer was built for
 
   function render() {
+    if (currentGuide && window.Guides && window.Guides.get(currentGuide)) { renderGuide(); return; }
+    currentGuide = null;
     var page = currentPage ? findPage(currentPage) : null;
     if (currentPage && !page) currentPage = null;
     $view.textContent = '';
@@ -175,9 +180,37 @@
     }
   }
 
+  function renderGuide() {
+    footFor = null;
+    $back.hidden = false;
+    var arg = guideArg;
+    guideArg = null; // only the first render after a tab switch scrolls to or opens an item
+    window.Guides.render({
+      id: currentGuide, tab: guideTab, arg: arg, view: $view, foot: $foot,
+      setTitle: function (t) { $title.textContent = t; },
+      setTab: setGuideTab, openGuide: openGuide, toast: toast, refresh: render,
+      confirm: function (message, label) {
+        return ask({ title: 'Are you sure?', message: message, buttons: [{ label: 'Cancel', value: 'no', cls: 'alt' }, { label: label, value: 'yes', cls: 'danger' }] })
+          .then(function (r) { return !!r && r.value === 'yes'; });
+      }
+    });
+  }
+
   function renderHome() {
     $title.textContent = 'My Plans';
     $back.hidden = true;
+    if (window.Guides && window.Guides.order.length) {
+      $view.appendChild(el('div', { class: 'sect', text: 'Guides' }));
+      window.Guides.order.forEach(function (id) {
+        var g = window.Guides.get(id);
+        $view.appendChild(el('button', { class: 'gcard link g-' + id, type: 'button', onclick: function () { openGuide(id); } }, [
+          el('div', { class: 'gcard-t', text: g.title }),
+          el('div', { class: 'gcard-s', text: g.blurb }),
+          el('div', { class: 'gcard-k', text: window.Guides.summary(id) })
+        ]));
+      });
+      $view.appendChild(el('div', { class: 'sect', text: 'My pages' }));
+    }
     if (!state.pages.length) {
       $view.appendChild(el('div', { class: 'empty', text: 'Nothing here yet. Tap "New page" to make your first list, like a workout or meal plan.' }));
     }
@@ -236,18 +269,42 @@
   // ---------- navigation ----------
   function openPage(id) {
     currentPage = id;
+    currentGuide = null;
     history.pushState({ page: id }, '');
     window.scrollTo(0, 0);
     render();
   }
 
+  function openGuide(id) {
+    currentPage = null;
+    currentGuide = id;
+    guideTab = window.Guides.defaultTab(id);
+    guideArg = null;
+    history.pushState({ guide: id, tab: guideTab }, '');
+    window.scrollTo(0, 0);
+    render();
+  }
+
+  // Switching tabs replaces the history entry, so Back still leaves the guide in one step.
+  function setGuideTab(tab, arg) {
+    guideTab = tab;
+    guideArg = arg || null;
+    history.replaceState({ guide: currentGuide, tab: tab }, '');
+    if (!arg) window.scrollTo(0, 0);
+    render();
+  }
+
   $back.addEventListener('click', function () {
-    if (history.state && history.state.page) history.back();
-    else { currentPage = null; render(); }
+    if (history.state && (history.state.page || history.state.guide)) history.back();
+    else { currentPage = null; currentGuide = null; render(); }
   });
 
   window.addEventListener('popstate', function (e) {
-    currentPage = e.state && e.state.page ? e.state.page : null;
+    var s = e.state || {};
+    currentPage = s.page || null;
+    currentGuide = s.guide || null;
+    guideTab = s.tab || (currentGuide && window.Guides ? window.Guides.defaultTab(currentGuide) : null);
+    guideArg = null;
     render();
   });
 
@@ -330,7 +387,11 @@
   }
 
   // ---------- backup / restore ----------
-  function backupJson() { return JSON.stringify(state, null, 2); }
+  function backupJson() {
+    var out = { version: state.version, pages: state.pages };
+    if (window.Guides) out.guides = window.Guides.exportState();
+    return JSON.stringify(out, null, 2);
+  }
 
   function exportBackup() {
     var json = backupJson();
@@ -373,12 +434,14 @@
     var n = clean.pages.length;
     ask({
       title: 'Replace everything?',
-      message: 'This replaces all your current pages with the ' + n + ' page' + (n === 1 ? '' : 's') + ' in this backup.',
+      message: 'This replaces all your current pages with the ' + n + ' page' + (n === 1 ? '' : 's') + ' in this backup' + (parsed.guides && window.Guides ? ', along with your Gym and Meal plan progress.' : '.'),
       buttons: [{ label: 'Cancel', value: 'no', cls: 'alt' }, { label: 'Replace', value: 'yes', cls: 'danger' }]
     }).then(function (r) {
       if (!r || r.value !== 'yes') return;
       state = clean;
       currentPage = null;
+      currentGuide = null;
+      if (parsed.guides && window.Guides) window.Guides.importState(parsed.guides);
       save();
       render();
       toast('Restored');
