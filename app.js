@@ -164,7 +164,13 @@
   // ---------- rendering ----------
   var footFor = null; // page id the add-item footer was built for
 
+  // iOS resumes a home-screen app from memory instead of reloading it, so "Today" views must
+  // refresh when the local date changes while the app was in the background.
+  function dayKey() { var d = new Date(); return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); }
+  var lastDay = dayKey();
+
   function render() {
+    lastDay = dayKey();
     if (currentGuide && window.Guides && window.Guides.get(currentGuide)) { renderGuide(); return; }
     currentGuide = null;
     var page = currentPage ? findPage(currentPage) : null;
@@ -493,6 +499,18 @@
   });
 
   // ---------- boot ----------
+  function onResume() { if (dayKey() !== lastDay) render(); }
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      // Commit a half-typed value (fires its change handler) in case iOS discards the suspended app.
+      var f = document.activeElement;
+      if (f && (f.tagName === 'INPUT' || f.tagName === 'TEXTAREA')) f.blur();
+    } else {
+      onResume();
+    }
+  });
+  window.addEventListener('pageshow', onResume);
+
   history.replaceState(null, '');
   render();
 
