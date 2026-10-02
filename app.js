@@ -440,7 +440,7 @@
     var n = clean.pages.length;
     ask({
       title: 'Replace everything?',
-      message: 'This replaces all your current pages with the ' + n + ' page' + (n === 1 ? '' : 's') + ' in this backup' + (parsed.guides && window.Guides ? ', along with your Gym and Meal plan progress.' : '.'),
+      message: 'This replaces all your current pages with the ' + n + ' page' + (n === 1 ? '' : 's') + ' in this backup' + (parsed.guides && window.Guides ? ', along with the progress and timetable events it contains.' : '.'),
       buttons: [{ label: 'Cancel', value: 'no', cls: 'alt' }, { label: 'Replace', value: 'yes', cls: 'danger' }]
     }).then(function (r) {
       if (!r || r.value !== 'yes') return;

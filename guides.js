@@ -910,7 +910,13 @@
     summary: summary,
     sanitize: sanitize,
     exportState: function () { return st; },
-    importState: function (raw) { st = sanitize(raw); save(); },
+    // A backup made before the timetable existed has no "time" section; keep the events entered since.
+    importState: function (raw) {
+      var keep = st.time;
+      st = sanitize(raw);
+      if (!raw || typeof raw !== 'object' || !raw.time || typeof raw.time !== 'object') st.time = keep;
+      save();
+    },
     tabKeys: function (id) { return G[id] ? G[id].tabs.map(function (x) { return x[0]; }) : []; },
     defaultTab: function (id) { return G[id] ? G[id].defaultTab : null; }
   };
